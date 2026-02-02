@@ -33,6 +33,8 @@
         .sidebar-item {
             border-radius: 1.25rem;
             transition: all 0.3s ease;
+            position: relative;
+            group: hover;
         }
 
         .sidebar-item.active {
@@ -70,9 +72,19 @@
             font-family: 'Courier New', Courier, monospace;
         }
 
+        .delete-board-btn {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .sidebar-item:hover .delete-board-btn {
+            opacity: 1;
+        }
+
         @media (max-width: 768px) {
             body { padding: 10px; }
             main { min-height: 100vh; margin-top: 10px; }
+            .delete-board-btn { opacity: 1; }
         }
     </style>
 </head>
@@ -88,8 +100,7 @@
         <nav class="flex-1 space-y-2 mb-6" id="sidebarTabs"></nav>
 
         <div class="space-y-3">
-            <button onclick="viewFailures()" class="w-full py-3 rounded-2xl text-[11px] font-bold text-red-400 border border-red-500/10">HISTORIAL DE FALLOS</button>
-            <button onclick="openNewBoardModal()" class="w-full btn-primary py-4 text-sm">Nuevo Núcleo</button>
+            <button onclick="openNewBoardModal()" class="w-full btn-primary py-4 text-sm uppercase tracking-widest">Nuevo Núcleo</button>
         </div>
     </aside>
 
@@ -125,17 +136,8 @@
         </div>
     </div>
 
-    <div id="failuresModal" class="fixed inset-0 bg-black/95 z-[60] hidden flex items-center justify-center p-4">
-        <div class="soft-glass max-w-2xl w-full p-8 flex flex-col max-h-[90vh]">
-            <h3 class="text-2xl font-bold mb-6">Fallas de Integridad</h3>
-            <div id="failuresList" class="flex-1 overflow-y-auto space-y-4"></div>
-            <button onclick="closeFailures()" class="mt-6 btn-primary py-4">CERRAR</button>
-        </div>
-    </div>
-
     <script>
         let boards = JSON.parse(localStorage.getItem('ctrl_ak_boards')) || [];
-        let failures = JSON.parse(localStorage.getItem('ctrl_ak_failures')) || [];
         let activeBoardId = localStorage.getItem('ctrl_ak_active') || null;
         let selectedMode = 'basic';
         let cronInterval;
@@ -147,16 +149,15 @@
 
         function save() {
             localStorage.setItem('ctrl_ak_boards', JSON.stringify(boards));
-            localStorage.setItem('ctrl_ak_failures', JSON.stringify(failures));
         }
 
-        // --- CRONÓMETRO MEJORADO (CON MS) ---
+        // --- CRONÓMETRO ---
         function formatTime(ms) {
             const totalSecs = Math.floor(ms / 1000);
             const h = Math.floor(totalSecs / 3600);
             const m = Math.floor((totalSecs % 3600) / 60);
             const s = totalSecs % 60;
-            const milli = Math.floor((ms % 1000) / 10); // Mostramos solo 2 dígitos de ms
+            const milli = Math.floor((ms % 1000) / 10);
 
             const parts = [];
             if (h > 0) parts.push(h.toString().padStart(2, '0'));
@@ -185,19 +186,15 @@
 
         function runCron(id) {
             if (cronInterval) clearInterval(cronInterval);
-            // Usamos un intervalo más corto (40ms aprox 25fps) para fluidez de milisegundos
             cronInterval = setInterval(() => {
                 const b = boards.find(x => x.id == id);
                 if (!b || !b.cron || !b.cron.active) { 
                     clearInterval(cronInterval); 
                     return; 
                 }
-
                 const totalMs = b.cron.elapsed + (Date.now() - b.cron.lastStart);
                 const display = document.getElementById('timerDisplay');
-                if (display) {
-                    display.innerHTML = formatTime(totalMs);
-                }
+                if (display) display.innerHTML = formatTime(totalMs);
             }, 40);
         }
 
@@ -213,9 +210,14 @@
         function renderSidebar() {
             const container = document.getElementById('sidebarTabs');
             container.innerHTML = boards.map(b => `
-                <div class="sidebar-item p-4 cursor-pointer flex flex-col ${activeBoardId == b.id ? 'active' : 'text-neutral-500 hover:bg-white/5'}" onclick="switchBoard(${b.id})">
-                    <span class="font-bold text-sm truncate">${b.title}</span>
-                    <span class="text-[9px] opacity-50 uppercase tracking-widest">${b.mode === 'basic' ? 'Notas' : b.mode}</span>
+                <div class="sidebar-item p-4 cursor-pointer flex justify-between items-center group ${activeBoardId == b.id ? 'active' : 'text-neutral-500 hover:bg-white/5'}" onclick="switchBoard(${b.id})">
+                    <div class="flex flex-col flex-1 overflow-hidden">
+                        <span class="font-bold text-sm truncate">${b.title}</span>
+                        <span class="text-[9px] opacity-50 uppercase tracking-widest">${b.mode === 'basic' ? 'Notas' : b.mode}</span>
+                    </div>
+                    <button onclick="confirmDeleteBoard(event, ${b.id})" class="delete-board-btn p-2 hover:text-red-500 transition-colors ml-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </button>
                 </div>
             `).join('');
         }
@@ -227,28 +229,27 @@
 
             if (!b) {
                 header.innerHTML = "";
-                container.innerHTML = `<div class="mt-20 text-center opacity-30 text-sm font-bold uppercase tracking-[0.2em]">Seleccionar Núcleo</div>`;
+                container.innerHTML = `<div class="mt-20 text-center opacity-30 text-sm font-bold uppercase tracking-[0.2em]">Seleccionar o Crear Núcleo</div>`;
                 return;
             }
 
             if (!b.cron) b.cron = { active: false, elapsed: 0, lastStart: 0 };
-
             const currentTotal = b.cron.active ? (b.cron.elapsed + (Date.now() - b.cron.lastStart)) : b.cron.elapsed;
 
             header.innerHTML = `
                 <div class="flex-1">
                     <h2 class="text-3xl font-black text-white">${b.title}</h2>
-                    <p class="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mt-1">Modo: ${b.mode}</p>
+                    <p class="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mt-1">SISTEMA: ${b.mode}</p>
                 </div>
                 <div class="flex items-center gap-4 p-4 card-item bg-white/5 border-white/10">
                     <div class="text-left min-w-[100px]">
-                        <span class="block text-[8px] text-neutral-500 uppercase font-bold mb-1">Enfoque AK</span>
+                        <span class="block text-[8px] text-neutral-500 uppercase font-bold mb-1 tracking-widest">Enfoque AK</span>
                         <span id="timerDisplay" class="text-2xl font-black mono-timer ${b.cron.active ? 'text-green-500' : 'text-neutral-400'}">
                             ${formatTime(currentTotal)}
                         </span>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="toggleCron(${b.id})" class="${b.cron.active ? 'bg-red-500 text-black' : 'bg-green-500 text-black'} px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all transform active:scale-95 shadow-lg ${b.cron.active ? 'shadow-red-500/20' : 'shadow-green-500/20'}">
+                        <button onclick="toggleCron(${b.id})" class="${b.cron.active ? 'bg-red-500 text-black' : 'bg-green-500 text-black'} px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all transform active:scale-95">
                             ${b.cron.active ? 'STOP' : 'START'}
                         </button>
                         <button onclick="resetCron(${b.id})" class="bg-white/5 text-white/40 hover:text-white/80 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-colors">Reset</button>
@@ -259,12 +260,12 @@
             if (b.cron.active) runCron(b.id);
 
             if (b.mode === 'basic') {
-                container.innerHTML = `<textarea oninput="updateBasic(${b.id}, this.value)" class="flex-1 w-full min-h-[400px] p-6 text-neutral-300 leading-relaxed resize-none border-none bg-transparent" placeholder="Escribe tu bitácora de hoy...">${b.content || ''}</textarea>`;
+                container.innerHTML = `<textarea oninput="updateBasic(${b.id}, this.value)" class="flex-1 w-full min-h-[400px] p-6 text-neutral-300 leading-relaxed resize-none border-none bg-transparent outline-none" placeholder="Bitácora de alta precisión...">${b.content || ''}</textarea>`;
             } else if (b.mode === 'goals') {
                 container.innerHTML = `
                     <div class="max-w-xl mx-auto w-full">
                         <div class="flex gap-2 mb-8">
-                            <input type="text" id="goalAdd" placeholder="Nueva meta..." class="flex-1 p-4 text-sm">
+                            <input type="text" id="goalAdd" placeholder="Añadir objetivo..." class="flex-1 p-4 text-sm">
                             <button onclick="addItem(${b.id})" class="btn-primary px-6 text-xl">+</button>
                         </div>
                         <ul class="space-y-3">${b.content.map(i => renderItem(b.id, i)).join('')}</ul>
@@ -274,17 +275,17 @@
                 container.innerHTML = `
                     <div class="flex flex-col gap-10">
                         <section>
-                            <h3 class="text-green-500 text-[10px] font-bold uppercase mb-4 tracking-widest">Compromisos (SÍ)</h3>
+                            <h3 class="text-green-500 text-[10px] font-bold uppercase mb-4 tracking-widest">Mandatos (SÍ)</h3>
                             <div class="flex gap-2 mb-4">
-                                <input type="text" id="doAdd" placeholder="Añadir compromiso..." class="flex-1 p-3 text-sm">
+                                <input type="text" id="doAdd" placeholder="Definir compromiso..." class="flex-1 p-3 text-sm">
                                 <button onclick="addLimit(${b.id}, 'do')" class="px-4 card-item font-bold text-green-500">+</button>
                             </div>
                             <ul class="space-y-2">${b.content.do.map(i => renderItem(b.id, i, 'do')).join('')}</ul>
                         </section>
                         <section class="pb-20">
-                            <h3 class="text-purple-500 text-[10px] font-bold uppercase mb-4 tracking-widest">Restricciones (NO)</h3>
+                            <h3 class="text-purple-500 text-[10px] font-bold uppercase mb-4 tracking-widest">Inhibiciones (NO)</h3>
                             <div class="flex gap-2 mb-4">
-                                <input type="text" id="dontAdd" placeholder="Añadir límite..." class="flex-1 p-3 text-sm">
+                                <input type="text" id="dontAdd" placeholder="Definir restricción..." class="flex-1 p-3 text-sm">
                                 <button onclick="addLimit(${b.id}, 'dont')" class="px-4 card-item font-bold text-purple-500">+</button>
                             </div>
                             <ul class="space-y-2">${b.content.dont.map(i => renderItem(b.id, i, 'dont')).join('')}</ul>
@@ -296,24 +297,36 @@
 
         function renderItem(bid, i, type = null) {
             return `
-                <li class="card-item p-4 flex justify-between items-center">
+                <li class="card-item p-4 flex justify-between items-center group/item">
                     <div class="flex items-center gap-4 flex-1 cursor-pointer" onclick="toggleItem(${bid}, ${i.id}, '${type}')">
                         <div class="w-6 h-6 rounded-lg border border-neutral-700 flex items-center justify-center transition-colors ${i.completed ? 'bg-green-500 border-green-500' : ''}">
                             ${i.completed ? '<span class="text-black font-bold text-xs">✓</span>' : ''}
                         </div>
                         <span class="text-sm font-medium ${i.completed ? 'line-through opacity-30' : ''}">${i.text}</span>
                     </div>
-                    <button onclick="deleteItem(${bid}, ${i.id}, '${type}')" class="text-neutral-700 hover:text-red-500 px-2">✕</button>
+                    <button onclick="deleteItem(${bid}, ${i.id}, '${type}')" class="text-neutral-700 hover:text-red-500 px-2 opacity-0 group-hover/item:opacity-100 transition-opacity">✕</button>
                 </li>
             `;
         }
 
+        // --- CORE LOGIC ---
         function switchBoard(id) { 
             activeBoardId = id; 
             localStorage.setItem('ctrl_ak_active', id); 
             if (cronInterval) clearInterval(cronInterval);
             renderSidebar(); 
             renderContent(); 
+        }
+
+        function confirmDeleteBoard(event, id) {
+            event.stopPropagation();
+            if (confirm("¿Eliminar este núcleo? Esta acción es irreversible.")) {
+                boards = boards.filter(b => b.id !== id);
+                if (activeBoardId == id) activeBoardId = boards.length > 0 ? boards[0].id : null;
+                save();
+                renderSidebar();
+                renderContent();
+            }
         }
 
         function openNewBoardModal() { document.getElementById('newBoardModal').classList.remove('hidden'); }
@@ -363,9 +376,6 @@
             else b.content = b.content.filter(x => x.id != iid);
             save(); renderContent();
         }
-
-        function viewFailures() { document.getElementById('failuresModal').classList.remove('hidden'); }
-        function closeFailures() { document.getElementById('failuresModal').classList.add('hidden'); }
     </script>
 </body>
 </html>
